@@ -2,21 +2,14 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"io"
 	"log"
 	"os/exec"
 	"sync"
 )
 
-const (
-	sampleRate    = 44100
-	channels      = 2
-	bitsPerSample = 16
-)
-
-// LineInSource captures audio from an ALSA device using arecord and
-// streams it to clients as a WAV stream (audio/wav).
+// LineInSource captures audio from an ALSA device using ffmpeg and
+// streams it to clients as MP3 (audio/mpeg).
 type LineInSource struct {
 	device string
 	hub    *Hub
@@ -40,8 +33,9 @@ func (l *LineInSource) IsPlaying() bool {
 }
 
 func (l *LineInSource) Start() error {
-	header := buildWAVHeader()
-	l.hub.SetFormat("audio/wav", header)
+	// Stream as MP3 so browsers can decode it incrementally.
+	// WAV is not a streaming format and causes clicks/pops.
+	l.hub.SetFormat("audio/mpeg", nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	l.mu.Lock()
@@ -65,15 +59,19 @@ func (l *LineInSource) Stop() {
 }
 
 func (l *LineInSource) capture(ctx context.Context) {
-	// arecord outputs raw S16_LE PCM; we wrap it in WAV on the client side
-	// by sending a WAV header to each new subscriber (via hub.SetFormat).
+	// Use ffmpeg to capture from ALSA and encode to MP3 in real-time.
+	// MP3 is frame-based so browsers can decode the stream incrementally,
+	// unlike WAV which is a file format and causes clicks/pops when streamed.
 	cmd := exec.CommandContext(ctx,
-		"arecord",
-		"-D", l.device,
-		"-f", "S16_LE",
-		"-c", "2",
-		"-r", "44100",
-		"-t", "raw",
+		"ffmpeg",
+		"-f", "alsa",
+		"-ac", "2",
+		"-ar", "44100",
+		"-i", l.device,
+		"-codec:a", "libmp3lame",
+		"-b:a", "192k",
+		"-f", "mp3",
+		"-",
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -83,8 +81,8 @@ func (l *LineInSource) capture(ctx context.Context) {
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("linein: arecord start error: %v", err)
-		log.Printf("linein: ensure alsa-utils is installed (apt install alsa-utils)")
+		log.Printf("linein: ffmpeg start error: %v", err)
+		log.Printf("linein: ensure ffmpeg is installed (apt install ffmpeg)")
 		return
 	}
 
@@ -103,29 +101,5 @@ func (l *LineInSource) capture(ctx context.Context) {
 	}
 
 	_ = cmd.Wait()
-	log.Printf("linein: arecord exited")
-}
-
-// buildWAVHeader returns a 44-byte WAV header for a streaming PCM source.
-// The data-chunk size is set to 0xFFFFFFFF to signal an open-ended stream.
-func buildWAVHeader() []byte {
-	const dataSize = 0xFFFFFFFF
-	byteRate := uint32(sampleRate * channels * bitsPerSample / 8)
-	blockAlign := uint16(channels * bitsPerSample / 8)
-
-	hdr := make([]byte, 44)
-	copy(hdr[0:], "RIFF")
-	binary.LittleEndian.PutUint32(hdr[4:], 0xFFFFFFFF) // open-ended stream
-	copy(hdr[8:], "WAVE")
-	copy(hdr[12:], "fmt ")
-	binary.LittleEndian.PutUint32(hdr[16:], 16) // fmt chunk size
-	binary.LittleEndian.PutUint16(hdr[20:], 1)  // PCM = 1
-	binary.LittleEndian.PutUint16(hdr[22:], uint16(channels))
-	binary.LittleEndian.PutUint32(hdr[24:], uint32(sampleRate))
-	binary.LittleEndian.PutUint32(hdr[28:], byteRate)
-	binary.LittleEndian.PutUint16(hdr[32:], blockAlign)
-	binary.LittleEndian.PutUint16(hdr[34:], uint16(bitsPerSample))
-	copy(hdr[36:], "data")
-	binary.LittleEndian.PutUint32(hdr[40:], dataSize)
-	return hdr
+	log.Printf("linein: capture exited")
 }
