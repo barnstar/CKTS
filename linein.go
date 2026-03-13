@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"log"
 	"os/exec"
 	"sync"
@@ -62,16 +61,26 @@ func (l *LineInSource) capture(ctx context.Context) {
 	// Use ffmpeg to capture from ALSA and encode to MP3 in real-time.
 	// MP3 is frame-based so browsers can decode the stream incrementally,
 	// unlike WAV which is a file format and causes clicks/pops when streamed.
+	//
+	// Audio format options (-ac, -ar) are placed AFTER -i so they apply to
+	// the output encoder.  This lets ffmpeg auto-negotiate the native ALSA
+	// capture format and resample internally, avoiding garbled audio when
+	// the device doesn't natively support the requested rate.
 	cmd := exec.CommandContext(ctx,
 		"ffmpeg",
+		"-nostdin",
+		"-hide_banner",
+		"-loglevel", "error",
 		"-f", "alsa",
+		"-i", l.device,
 		"-ac", "2",
 		"-ar", "44100",
-		"-i", l.device,
 		"-codec:a", "libmp3lame",
 		"-b:a", "192k",
+		"-write_xing", "0",
+		"-flush_packets", "1",
 		"-f", "mp3",
-		"-",
+		"pipe:1",
 	)
 
 	stdout, err := cmd.StdoutPipe()
@@ -88,12 +97,14 @@ func (l *LineInSource) capture(ctx context.Context) {
 
 	log.Printf("linein: capturing from device %q", l.device)
 
-	const chunkSize = 4096
-	buf := make([]byte, chunkSize)
+	buf := make([]byte, 8192)
 	for {
-		n, err := io.ReadFull(stdout, buf)
+		n, err := stdout.Read(buf)
 		if n > 0 {
-			l.hub.Broadcast(buf[:n])
+			// Copy the slice so the hub can hand it off safely.
+			chunk := make([]byte, n)
+			copy(chunk, buf[:n])
+			l.hub.Broadcast(chunk)
 		}
 		if err != nil {
 			break
