@@ -1,11 +1,15 @@
 package main
 
-import "sync"
+import (
+	"net"
+	"sync"
+)
 
 // Client represents a single connected listener.
 type Client struct {
-	ch        chan []byte
-	closeOnce sync.Once
+	ch         chan []byte
+	remoteAddr string
+	closeOnce  sync.Once
 }
 
 func (c *Client) close() {
@@ -40,11 +44,12 @@ func (h *Hub) ContentType() string {
 }
 
 // Subscribe registers a new client and returns it.
+// remoteAddr is the client's address (used for unique listener counting).
 // The header (if any) is queued immediately.
-func (h *Hub) Subscribe() *Client {
+func (h *Hub) Subscribe(remoteAddr string) *Client {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	c := &Client{ch: make(chan []byte, 128)}
+	c := &Client{ch: make(chan []byte, 128), remoteAddr: remoteAddr}
 	h.clients[c] = struct{}{}
 	if len(h.header) > 0 {
 		buf := make([]byte, len(h.header))
@@ -88,9 +93,25 @@ func (h *Hub) CloseAll() {
 	}
 }
 
-// ClientCount returns the number of currently connected listeners.
+// ClientCount returns the number of currently connected streams.
 func (h *Hub) ClientCount() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return len(h.clients)
+}
+
+// ListenerCount returns the number of unique listeners (by IP, ignoring port).
+// Browsers often open multiple connections per tab, so this avoids double-counting.
+func (h *Hub) ListenerCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	seen := make(map[string]struct{})
+	for c := range h.clients {
+		host, _, err := net.SplitHostPort(c.remoteAddr)
+		if err != nil {
+			host = c.remoteAddr
+		}
+		seen[host] = struct{}{}
+	}
+	return len(seen)
 }

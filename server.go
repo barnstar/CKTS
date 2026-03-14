@@ -61,7 +61,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 	flusher, canFlush := w.(http.Flusher)
 
-	client := s.hub.Subscribe()
+	client := s.hub.Subscribe(r.RemoteAddr)
 	defer s.hub.Unsubscribe(client)
 
 	log.Printf("stream: client connected (%s)", r.RemoteAddr)
@@ -96,7 +96,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{
 		Playing: s.src.IsPlaying(),
 		Track:   s.src.CurrentTrack(),
-		Clients: s.hub.ClientCount(),
+		Clients: s.hub.ListenerCount(),
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -194,7 +194,9 @@ const uiHTML = `<!DOCTYPE html>
     margin-bottom: 24px;
     border-radius: 8px;
     accent-color: #7c85ff;
+    display: none;
   }
+  audio.visible { display: block; }
   .controls { display: flex; gap: 12px; }
   button {
     flex: 1;
@@ -208,8 +210,8 @@ const uiHTML = `<!DOCTYPE html>
   }
   button:active { transform: scale(0.97); }
   button:disabled { opacity: 0.35; cursor: default; }
-  #startBtn { background: #4caf50; color: #fff; }
-  #stopBtn  { background: #e05050; color: #fff; }
+  #toggleBtn { background: #4caf50; color: #fff; }
+  #toggleBtn.on { background: #e05050; }
   .error { color: #ff6060; font-size: 0.85rem; margin-top: 16px; min-height: 1.2em; }
 </style>
 </head>
@@ -227,8 +229,7 @@ const uiHTML = `<!DOCTYPE html>
   <audio id="player" controls></audio>
 
   <div class="controls">
-    <button id="startBtn" onclick="startStream()">&#9654; Start</button>
-    <button id="stopBtn"  onclick="stopStream()">&#9632; Stop</button>
+    <button id="toggleBtn" onclick="toggleStream()">&#9654; Listen</button>
   </div>
   <div class="error" id="errMsg"></div>
 </div>
@@ -240,8 +241,9 @@ const label    = document.getElementById('statusLabel');
 const trackEl  = document.getElementById('track');
 const clientEl = document.getElementById('clients');
 const errMsg   = document.getElementById('errMsg');
-const startBtn = document.getElementById('startBtn');
-const stopBtn  = document.getElementById('stopBtn');
+const toggleBtn = document.getElementById('toggleBtn');
+
+let streaming = false;
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -258,6 +260,20 @@ function applyStatus(data) {
     trackEl.textContent = '—';
     clientEl.textContent = '';
   }
+  streaming = data.playing;
+  updateToggle();
+}
+
+function updateToggle() {
+  if (streaming) {
+    toggleBtn.innerHTML = '&#9632; Stop';
+    toggleBtn.classList.add('on');
+    player.classList.add('visible');
+  } else {
+    toggleBtn.innerHTML = '&#9654; Start';
+    toggleBtn.classList.remove('on');
+    player.classList.remove('visible');
+  }
 }
 
 function pollStatus() {
@@ -267,27 +283,39 @@ function pollStatus() {
     .catch(() => {});
 }
 
+function toggleStream() {
+  if (streaming) {
+    stopStream();
+  } else {
+    startStream();
+  }
+}
+
 function startStream() {
-  startBtn.disabled = true;
+  toggleBtn.disabled = true;
   fetch('/api/start', {method: 'POST'})
     .then(r => {
       if (!r.ok) return r.text().then(t => { throw new Error(t); });
+      streaming = true;
+      updateToggle();
       player.src = '/stream?' + Date.now();
       player.play().catch(() => {});
       pollStatus();
     })
     .catch(e => { setError('Start failed: ' + e.message); })
-    .finally(() => { startBtn.disabled = false; });
+    .finally(() => { toggleBtn.disabled = false; });
 }
 
 function stopStream() {
-  stopBtn.disabled = true;
+  toggleBtn.disabled = true;
   player.pause();
   player.src = '';
+  streaming = false;
+  updateToggle();
   fetch('/api/stop', {method: 'POST'})
     .then(() => pollStatus())
     .catch(() => {})
-    .finally(() => { stopBtn.disabled = false; });
+    .finally(() => { toggleBtn.disabled = false; });
 }
 
 setInterval(pollStatus, 3000);
