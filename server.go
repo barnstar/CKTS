@@ -158,12 +158,17 @@ const uiHTML = `<!DOCTYPE html>
     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
   }
   h1 {
-    font-size: 2rem;
-    color: #7c85ff;
-    margin-bottom: 8px;
-    letter-spacing: 0.05em;
+    font-family: 'Impact', 'Arial Black', 'Helvetica Neue', sans-serif;
+    font-size: 3rem;
+    font-weight: 900;
+    font-style: italic;
+    color: #ffffff;
+    text-transform: uppercase;
+    text-align: center;
+    letter-spacing: 0.04em;
+    text-shadow: 3px 3px 0 #111, 5px 5px 10px rgba(0,0,0,0.6);
+    margin-bottom: 32px;
   }
-  h1 { margin-bottom: 32px; }
   .status-row {
     display: flex;
     align-items: center;
