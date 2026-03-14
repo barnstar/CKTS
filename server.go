@@ -177,7 +177,7 @@ const uiHTML = `<!DOCTYPE html>
     flex-shrink: 0;
     transition: background 0.3s;
   }
-  .dot.live { background: #4caf50; box-shadow: 0 0 8px #4caf5080; animation: pulse 1.5s infinite; }
+  .dot.live { background: #7c9fff; box-shadow: 0 0 8px #7c9fff60; animation: pulse 1.5s infinite; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
   .status-label { font-size: 0.85rem; color: #8080b0; text-transform: uppercase; letter-spacing: 0.08em; }
   .track {
@@ -210,9 +210,9 @@ const uiHTML = `<!DOCTYPE html>
   }
   button:active { transform: scale(0.97); }
   button:disabled { opacity: 0.35; cursor: default; }
-  #toggleBtn { background: #4caf50; color: #fff; }
-  #toggleBtn.on { background: #e05050; }
-  .error { color: #ff6060; font-size: 0.85rem; margin-top: 16px; min-height: 1.2em; }
+  #toggleBtn { background: #4a7a8a; color: #fff; }
+  #toggleBtn.on { background: #6a7a88; }
+  .error { color: #d09090; font-size: 0.85rem; margin-top: 16px; min-height: 1.2em; }
 </style>
 </head>
 <body>
@@ -266,11 +266,11 @@ function applyStatus(data) {
 
 function updateToggle() {
   if (streaming) {
-    toggleBtn.innerHTML = '&#9632; Stop';
+    toggleBtn.innerHTML = '&#9632; Stop Listening';
     toggleBtn.classList.add('on');
     player.classList.add('visible');
   } else {
-    toggleBtn.innerHTML = '&#9654; Start';
+    toggleBtn.innerHTML = '&#9654; Listen';
     toggleBtn.classList.remove('on');
     player.classList.remove('visible');
   }
