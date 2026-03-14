@@ -32,7 +32,6 @@ func main() {
 		authKey  = flag.String("authkey", "", "tailscale auth key (optional)")
 		local    = flag.Bool("local", false, "listen on a local TCP address instead of tsnet")
 		addr     = flag.String("addr", ":8080", "listen address when -local is set")
-		autoplay = flag.Bool("autoplay", false, "start streaming immediately on launch")
 	)
 	flag.Parse()
 
@@ -75,11 +74,10 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Start streaming immediately if requested.
-	if *autoplay {
-		if err := src.Start(); err != nil {
-			log.Fatalf("autoplay start: %v", err)
-		}
+	// Start the audio source immediately — it runs continuously.
+	// Individual listeners tune in/out via their browser.
+	if err := src.Start(); err != nil {
+		log.Fatalf("start source: %v", err)
 	}
 
 	var ln net.Listener

@@ -177,7 +177,7 @@ const uiHTML = `<!DOCTYPE html>
     flex-shrink: 0;
     transition: background 0.3s;
   }
-  .dot.live { background: #7c9fff; box-shadow: 0 0 8px #7c9fff60; animation: pulse 1.5s infinite; }
+  .dot.live { background: #7c9fff; box-shadow: 0 0 8px #7c9fff60; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
   .status-label { font-size: 0.85rem; color: #8080b0; text-transform: uppercase; letter-spacing: 0.08em; }
   .track {
@@ -220,8 +220,8 @@ const uiHTML = `<!DOCTYPE html>
   <h1>{{CALLSIGN}} Radio</h1>
 
   <div class="status-row">
-    <div class="dot" id="dot"></div>
-    <span class="status-label" id="statusLabel">Stopped</span>
+    <div class="dot live" id="dot"></div>
+    <span class="status-label" id="statusLabel">On Air</span>
   </div>
   <div class="track" id="track">—</div>
   <div class="clients" id="clients"></div>
@@ -235,15 +235,15 @@ const uiHTML = `<!DOCTYPE html>
 </div>
 
 <script>
-const player   = document.getElementById('player');
-const dot      = document.getElementById('dot');
-const label    = document.getElementById('statusLabel');
-const trackEl  = document.getElementById('track');
-const clientEl = document.getElementById('clients');
-const errMsg   = document.getElementById('errMsg');
+const player    = document.getElementById('player');
+const dot       = document.getElementById('dot');
+const label     = document.getElementById('statusLabel');
+const trackEl   = document.getElementById('track');
+const clientEl  = document.getElementById('clients');
+const errMsg    = document.getElementById('errMsg');
 const toggleBtn = document.getElementById('toggleBtn');
 
-let streaming = false;
+let listening = false;
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -251,21 +251,19 @@ function applyStatus(data) {
   setError('');
   if (data.playing) {
     dot.classList.add('live');
-    label.textContent = 'Live';
+    label.textContent = 'On Air';
     trackEl.textContent = data.track || '—';
     clientEl.textContent = data.clients + ' listener' + (data.clients === 1 ? '' : 's');
   } else {
     dot.classList.remove('live');
-    label.textContent = 'Stopped';
+    label.textContent = 'Off Air';
     trackEl.textContent = '—';
     clientEl.textContent = '';
   }
-  streaming = data.playing;
-  updateToggle();
 }
 
 function updateToggle() {
-  if (streaming) {
+  if (listening) {
     toggleBtn.innerHTML = '&#9632; Stop Listening';
     toggleBtn.classList.add('on');
     player.classList.add('visible');
@@ -284,39 +282,40 @@ function pollStatus() {
 }
 
 function toggleStream() {
-  if (streaming) {
-    stopStream();
+  if (listening) {
+    stopListening();
   } else {
-    startStream();
+    startListening();
   }
 }
 
-function startStream() {
-  toggleBtn.disabled = true;
-  fetch('/api/start', {method: 'POST'})
-    .then(r => {
-      if (!r.ok) return r.text().then(t => { throw new Error(t); });
-      streaming = true;
-      updateToggle();
-      player.src = '/stream?' + Date.now();
-      player.play().catch(() => {});
-      pollStatus();
-    })
-    .catch(e => { setError('Start failed: ' + e.message); })
-    .finally(() => { toggleBtn.disabled = false; });
+function startListening() {
+  listening = true;
+  updateToggle();
+  player.src = '/stream?' + Date.now();
+  player.play().catch(() => {});
 }
 
-function stopStream() {
-  toggleBtn.disabled = true;
+function stopListening() {
   player.pause();
   player.src = '';
-  streaming = false;
+  listening = false;
   updateToggle();
-  fetch('/api/stop', {method: 'POST'})
-    .then(() => pollStatus())
-    .catch(() => {})
-    .finally(() => { toggleBtn.disabled = false; });
 }
+
+// Sync custom button with native audio controls.
+player.addEventListener('pause', () => {
+  if (listening) {
+    listening = false;
+    updateToggle();
+  }
+});
+player.addEventListener('play', () => {
+  if (!listening) {
+    listening = true;
+    updateToggle();
+  }
+});
 
 setInterval(pollStatus, 3000);
 pollStatus();
