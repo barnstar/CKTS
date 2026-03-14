@@ -210,15 +210,13 @@ const uiHTML = `<!DOCTYPE html>
   .clients { font-size: 0.8rem; color: #505080; margin-bottom: 28px; }
   .vu-wrap {
     display: none;
-    flex-direction: row;
     justify-content: center;
-    gap: 16px;
     margin-bottom: 24px;
   }
   .vu-wrap.visible { display: flex; }
   .vu-meter {
-    width: 200px;
-    height: 140px;
+    width: 320px;
+    height: 200px;
     background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
     border: 3px solid #888;
     border-radius: 12px;
@@ -267,8 +265,7 @@ const uiHTML = `<!DOCTYPE html>
   <div class="clients" id="clients"></div>
 
   <div class="vu-wrap" id="vuWrap">
-    <div class="vu-meter"><canvas id="vuCanvasL"></canvas></div>
-    <div class="vu-meter"><canvas id="vuCanvasR"></canvas></div>
+    <div class="vu-meter"><canvas id="vuCanvas"></canvas></div>
   </div>
 
   <audio id="player" controls></audio>
@@ -286,19 +283,16 @@ const trackEl   = document.getElementById('track');
 const clientEl  = document.getElementById('clients');
 const errMsg    = document.getElementById('errMsg');
 const toggleBtn = document.getElementById('toggleBtn');
-const vuWrap    = document.getElementById('vuWrap');
-const vuCanvasL = document.getElementById('vuCanvasL');
-const vuCanvasR = document.getElementById('vuCanvasR');
-const vuCtxL    = vuCanvasL.getContext('2d');
-const vuCtxR    = vuCanvasR.getContext('2d');
+const vuWrap   = document.getElementById('vuWrap');
+const vuCanvas = document.getElementById('vuCanvas');
+const vuCtx    = vuCanvas.getContext('2d');
 
 let listening = false;
 let audioCtx = null;
 let analyserL = null;
 let analyserR = null;
 let vuAnimId = null;
-let needleL = 0;
-let needleR = 0;
+let needlePos = 0;
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -393,9 +387,8 @@ function stopVU() {
     cancelAnimationFrame(vuAnimId);
     vuAnimId = null;
   }
-  needleL = 0; needleR = 0;
-  drawMeter(vuCtxL, vuCanvasL, 0, 'L');
-  drawMeter(vuCtxR, vuCanvasR, 0, 'R');
+  needlePos = 0;
+  drawMeter(0);
 }
 
 function rms(analyser) {
@@ -406,12 +399,9 @@ function rms(analyser) {
   return Math.sqrt(sum / buf.length);
 }
 
-// Map dB (-40..+3) to needle fraction (0..1).
+// Map dB (-40..+3) to fraction (0..1) across the arc.
 function dbToFrac(db) {
-  // VU scale is non-linear. We use a piecewise mapping that mimics a real VU.
-  // -20 is the 0 VU reference; above 0 VU is the red zone (+1..+3).
   const clamped = Math.max(-40, Math.min(3, db));
-  // Map: -40 -> 0, -20 -> 0.56, 0 -> 0.88, +3 -> 1.0
   if (clamped <= -20) return 0.56 * (clamped + 40) / 20;
   if (clamped <= 0)   return 0.56 + 0.32 * (clamped + 20) / 20;
   return 0.88 + 0.12 * clamped / 3;
@@ -421,42 +411,41 @@ function drawVU() {
   vuAnimId = requestAnimationFrame(drawVU);
   if (!analyserL || !analyserR) return;
 
-  const dbL = 20 * Math.log10(rms(analyserL) + 1e-10);
-  const dbR = 20 * Math.log10(rms(analyserR) + 1e-10);
-  const targetL = dbToFrac(dbL);
-  const targetR = dbToFrac(dbR);
+  // Combine L+R into mono RMS.
+  const monoRms = (rms(analyserL) + rms(analyserR)) / 2;
+  const db = 20 * Math.log10(monoRms + 1e-10);
+  const target = dbToFrac(db);
 
-  // Smooth needle movement (fast attack, slow release like real VU).
+  // Smooth needle: fast attack, slow release.
   const attack = 0.3;
   const release = 0.08;
-  needleL += (targetL > needleL ? attack : release) * (targetL - needleL);
-  needleR += (targetR > needleR ? attack : release) * (targetR - needleR);
+  needlePos += (target > needlePos ? attack : release) * (target - needlePos);
 
-  drawMeter(vuCtxL, vuCanvasL, needleL, 'L');
-  drawMeter(vuCtxR, vuCanvasR, needleR, 'R');
+  drawMeter(needlePos);
 }
 
-function drawMeter(ctx, canvas, frac, label) {
+function drawMeter(frac) {
   const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
+  const w = vuCanvas.clientWidth;
+  const h = vuCanvas.clientHeight;
+  vuCanvas.width = w * dpr;
+  vuCanvas.height = h * dpr;
+  vuCtx.scale(dpr, dpr);
+  vuCtx.clearRect(0, 0, w, h);
 
   const cx = w / 2;
-  const cy = h * 0.92;
-  const r = w * 0.42;
+  const cy = h * 0.88;            // pivot near bottom
+  const r  = Math.min(w, h) * 0.6; // needle length / arc radius
 
-  // Arc angles: left to right sweep.
-  const aStart = Math.PI + 0.35;  // ~215 deg
-  const aEnd   = -0.35;           // ~-20 deg (i.e. ~340 deg)
+  // Sweep: -60° to +60° where 0° = straight up.
+  // In canvas coords, straight up = -π/2.
+  const DEG = Math.PI / 180;
+  const aStart = -90 * DEG - 60 * DEG;  // -150° = left side
+  const aEnd   = -90 * DEG + 60 * DEG;  // -30°  = right side
 
   // ---- Scale markings ----
-  // dB values and their positions on the arc.
   const marks = [
-    {db: '-40', frac: 0},
+    {db: '-40', frac: 0.00},
     {db: '-30', frac: 0.28},
     {db: '-20', frac: 0.56},
     {db: '-10', frac: 0.72},
@@ -466,83 +455,78 @@ function drawMeter(ctx, canvas, frac, label) {
     {db: '0',   frac: 0.88},
     {db: '+1',  frac: 0.92},
     {db: '+2',  frac: 0.96},
-    {db: '+3',  frac: 1.0},
+    {db: '+3',  frac: 1.00},
   ];
 
-  // Draw arc.
-  ctx.strokeStyle = '#444';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, aStart, aEnd);
-  ctx.stroke();
+  // Main arc.
+  vuCtx.strokeStyle = '#444';
+  vuCtx.lineWidth = 1.5;
+  vuCtx.beginPath();
+  vuCtx.arc(cx, cy, r, aStart, aEnd);
+  vuCtx.stroke();
 
-  // Red zone arc (0 to +3).
-  const redStart = aStart + (aEnd - aStart) * 0.88;
-  ctx.strokeStyle = '#cc3333';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, redStart, aEnd);
-  ctx.stroke();
+  // Red zone arc (0 dB to +3 dB).
+  const redAngle = aStart + (aEnd - aStart) * 0.88;
+  vuCtx.strokeStyle = '#cc3333';
+  vuCtx.lineWidth = 3;
+  vuCtx.beginPath();
+  vuCtx.arc(cx, cy, r, redAngle, aEnd);
+  vuCtx.stroke();
 
-  // Tick marks and labels.
-  ctx.lineWidth = 1;
+  // Tick marks and dB labels.
+  vuCtx.lineWidth = 1;
   marks.forEach(m => {
     const a = aStart + (aEnd - aStart) * m.frac;
     const cos = Math.cos(a);
     const sin = Math.sin(a);
     const isRed = m.frac >= 0.88;
-    const isMajor = ['0', '-10', '-20', '-30', '-40', '+3'].includes(m.db);
-    const tickLen = isMajor ? 10 : 6;
+    const isMajor = ['-40','-30','-20','-10','0','+3'].includes(m.db);
+    const tickLen = isMajor ? 12 : 7;
 
-    ctx.strokeStyle = isRed ? '#cc3333' : '#444';
-    ctx.beginPath();
-    ctx.moveTo(cx + cos * (r - tickLen), cy + sin * (r - tickLen));
-    ctx.lineTo(cx + cos * r, cy + sin * r);
-    ctx.stroke();
+    vuCtx.strokeStyle = isRed ? '#cc3333' : '#444';
+    vuCtx.beginPath();
+    vuCtx.moveTo(cx + cos * (r - tickLen), cy + sin * (r - tickLen));
+    vuCtx.lineTo(cx + cos * r, cy + sin * r);
+    vuCtx.stroke();
 
     if (isMajor || isRed) {
-      ctx.fillStyle = isRed ? '#cc3333' : '#333';
-      ctx.font = (isMajor ? 'bold ' : '') + '9px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(m.db, cx + cos * (r + 11), cy + sin * (r + 11));
+      vuCtx.fillStyle = isRed ? '#cc3333' : '#333';
+      vuCtx.font = (isMajor ? 'bold ' : '') + '11px system-ui, sans-serif';
+      vuCtx.textAlign = 'center';
+      vuCtx.textBaseline = 'middle';
+      vuCtx.fillText(m.db, cx + cos * (r + 14), cy + sin * (r + 14));
     }
   });
 
   // "VU" label.
-  ctx.fillStyle = '#555';
-  ctx.font = 'bold 11px serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('VU', cx, cy - r * 0.35);
-
-  // Channel label.
-  ctx.fillStyle = '#888';
-  ctx.font = '9px system-ui, sans-serif';
-  ctx.fillText(label, cx, cy - r * 0.18);
+  vuCtx.fillStyle = '#555';
+  vuCtx.font = 'bold 14px serif';
+  vuCtx.textAlign = 'center';
+  vuCtx.fillText('VU', cx, cy - r * 0.32);
 
   // ---- Needle ----
   const needleAngle = aStart + (aEnd - aStart) * Math.max(0, Math.min(1, frac));
-  const needleLen = r - 14;
+  const needleLen = r - 16;
 
   // Shadow.
-  ctx.save();
-  ctx.shadowColor = 'rgba(0,0,0,0.3)';
-  ctx.shadowBlur = 4;
-  ctx.shadowOffsetY = 2;
-  ctx.strokeStyle = '#222';
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
-  ctx.stroke();
-  ctx.restore();
+  vuCtx.save();
+  vuCtx.shadowColor = 'rgba(0,0,0,0.25)';
+  vuCtx.shadowBlur = 4;
+  vuCtx.shadowOffsetY = 2;
+  vuCtx.strokeStyle = '#222';
+  vuCtx.lineWidth = 2;
+  vuCtx.lineCap = 'round';
+  vuCtx.beginPath();
+  vuCtx.moveTo(cx, cy);
+  vuCtx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
+  vuCtx.stroke();
+  vuCtx.restore();
 
   // Pivot dot.
-  ctx.fillStyle = '#333';
-  ctx.beginPath();
-  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-  ctx.fill();
+  vuCtx.fillStyle = '#333';
+  vuCtx.beginPath();
+  vuCtx.arc(cx, cy, 5, 0, Math.PI * 2);
+  vuCtx.fill();
 }
 
 // Sync custom button with native audio controls.
