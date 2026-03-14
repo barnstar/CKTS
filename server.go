@@ -56,6 +56,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-cache, no-store")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 
@@ -228,7 +229,8 @@ const uiHTML = `<!DOCTYPE html>
     text-shadow: 0 0 10px rgba(255,255,255,0.5);
   }
   .info-box {
-    width: 320px;
+    max-width: 320px;
+    width: 100%;
     margin: 0 auto 20px auto;
     padding: 14px 18px;
     text-align: center;
@@ -255,8 +257,9 @@ const uiHTML = `<!DOCTYPE html>
   }
   .vu-wrap.visible { display: flex; }
   .vu-meter {
-    width: 320px;
-    height: 200px;
+    max-width: 320px;
+    width: 100%;
+    aspect-ratio: 320 / 200;
     background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
     border: 3px solid #888;
     border-radius: 12px;
@@ -273,7 +276,8 @@ const uiHTML = `<!DOCTYPE html>
     display: none;
     align-items: center;
     gap: 10px;
-    width: 320px;
+    max-width: 320px;
+    width: 100%;
     margin: 0 auto 16px auto;
     padding: 10px 16px;
     background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
@@ -327,7 +331,8 @@ const uiHTML = `<!DOCTYPE html>
   .controls {
     display: flex;
     gap: 12px;
-    width: 320px;
+    max-width: 320px;
+    width: 100%;
     margin: 0 auto;
   }
   button {
@@ -377,7 +382,7 @@ const uiHTML = `<!DOCTYPE html>
     <div class="vu-meter"><canvas id="vuCanvas"></canvas></div>
   </div>
 
-  <audio id="player"></audio>
+  <audio id="player" crossorigin="anonymous"></audio>
 
   <div class="vol-wrap" id="volWrap">
     <span class="vol-icon" id="volIcon" onclick="toggleMute()">&#128266;</span>
@@ -409,6 +414,7 @@ const volPct   = document.getElementById('volPct');
 
 let listening = false;
 let audioCtx = null;
+let mediaSource = null;
 let analyserL = null;
 let analyserR = null;
 let vuAnimId = null;
@@ -507,27 +513,36 @@ function stopListening() {
 // ---- VU Meter (Web Audio API) ----
 
 function initVU() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    // iOS Safari: createMediaElementSource can only be called once per element.
+    if (!mediaSource) {
+      mediaSource = audioCtx.createMediaElementSource(player);
+    }
+
+    const splitter = audioCtx.createChannelSplitter(2);
+
+    analyserL = audioCtx.createAnalyser();
+    analyserR = audioCtx.createAnalyser();
+    analyserL.fftSize = 1024;
+    analyserR.fftSize = 1024;
+    analyserL.smoothingTimeConstant = 0.8;
+    analyserR.smoothingTimeConstant = 0.8;
+
+    mediaSource.disconnect();
+    mediaSource.connect(splitter);
+    splitter.connect(analyserL, 0);
+    splitter.connect(analyserR, 1);
+    mediaSource.connect(audioCtx.destination);
+
+    drawVU();
+  } catch (e) {
+    console.warn('VU meter init failed:', e);
   }
-  if (audioCtx.state === 'suspended') audioCtx.resume();
-
-  const src = audioCtx.createMediaElementSource(player);
-  const splitter = audioCtx.createChannelSplitter(2);
-
-  analyserL = audioCtx.createAnalyser();
-  analyserR = audioCtx.createAnalyser();
-  analyserL.fftSize = 1024;
-  analyserR.fftSize = 1024;
-  analyserL.smoothingTimeConstant = 0.8;
-  analyserR.smoothingTimeConstant = 0.8;
-
-  src.connect(splitter);
-  splitter.connect(analyserL, 0);
-  splitter.connect(analyserR, 1);
-  src.connect(audioCtx.destination);
-
-  drawVU();
 }
 
 function stopVU() {
