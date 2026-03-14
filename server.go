@@ -228,14 +228,61 @@ const uiHTML = `<!DOCTYPE html>
     width: 100%;
     height: 100%;
   }
-  audio {
-    width: 100%;
-    margin-bottom: 24px;
-    border-radius: 8px;
-    accent-color: #7c85ff;
+  audio { display: none; }
+  .vol-wrap {
     display: none;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
+    border: 3px solid #888;
+    border-radius: 10px;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.2);
   }
-  audio.visible { display: block; }
+  .vol-wrap.visible { display: flex; }
+  .vol-wrap .vol-icon {
+    font-size: 1.1rem;
+    color: #555;
+    cursor: pointer;
+    user-select: none;
+    min-width: 22px;
+    text-align: center;
+  }
+  .vol-wrap input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #bbb 0%, #888 100%);
+    outline: none;
+    cursor: pointer;
+  }
+  .vol-wrap input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #eee, #999);
+    border: 2px solid #666;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .vol-wrap input[type=range]::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 40% 35%, #eee, #999);
+    border: 2px solid #666;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  .vol-wrap .vol-pct {
+    font-size: 0.75rem;
+    color: #555;
+    min-width: 32px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
   .controls { display: flex; gap: 12px; }
   button {
     flex: 1;
@@ -268,7 +315,13 @@ const uiHTML = `<!DOCTYPE html>
     <div class="vu-meter"><canvas id="vuCanvas"></canvas></div>
   </div>
 
-  <audio id="player" controls></audio>
+  <audio id="player"></audio>
+
+  <div class="vol-wrap" id="volWrap">
+    <span class="vol-icon" id="volIcon" onclick="toggleMute()">&#128266;</span>
+    <input type="range" id="volSlider" min="0" max="100" value="80">
+    <span class="vol-pct" id="volPct">80%</span>
+  </div>
 
   <div class="controls">
     <button id="toggleBtn" onclick="toggleStream()">&#9654; Listen</button>
@@ -286,6 +339,10 @@ const toggleBtn = document.getElementById('toggleBtn');
 const vuWrap   = document.getElementById('vuWrap');
 const vuCanvas = document.getElementById('vuCanvas');
 const vuCtx    = vuCanvas.getContext('2d');
+const volWrap  = document.getElementById('volWrap');
+const volSlider = document.getElementById('volSlider');
+const volIcon  = document.getElementById('volIcon');
+const volPct   = document.getElementById('volPct');
 
 let listening = false;
 let audioCtx = null;
@@ -293,6 +350,32 @@ let analyserL = null;
 let analyserR = null;
 let vuAnimId = null;
 let needlePos = 0;
+let savedVol = 80;
+
+// Volume slider wiring.
+player.volume = 0.8;
+volSlider.addEventListener('input', () => {
+  const v = parseInt(volSlider.value, 10);
+  player.volume = v / 100;
+  volPct.textContent = v + '%';
+  volIcon.innerHTML = v === 0 ? '&#128264;' : v < 50 ? '&#128265;' : '&#128266;';
+  if (v > 0) savedVol = v;
+});
+
+function toggleMute() {
+  if (player.volume > 0) {
+    savedVol = parseInt(volSlider.value, 10);
+    volSlider.value = 0;
+    player.volume = 0;
+    volPct.textContent = '0%';
+    volIcon.innerHTML = '&#128264;';
+  } else {
+    volSlider.value = savedVol;
+    player.volume = savedVol / 100;
+    volPct.textContent = savedVol + '%';
+    volIcon.innerHTML = savedVol < 50 ? '&#128265;' : '&#128266;';
+  }
+}
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -315,13 +398,13 @@ function updateToggle() {
   if (listening) {
     toggleBtn.innerHTML = '&#9632; Stop Listening';
     toggleBtn.classList.add('on');
-    player.classList.add('visible');
     vuWrap.classList.add('visible');
+    volWrap.classList.add('visible');
   } else {
     toggleBtn.innerHTML = '&#9654; Listen';
     toggleBtn.classList.remove('on');
-    player.classList.remove('visible');
     vuWrap.classList.remove('visible');
+    volWrap.classList.remove('visible');
   }
 }
 
@@ -529,7 +612,7 @@ function drawMeter(frac) {
   vuCtx.fill();
 }
 
-// Sync custom button with native audio controls.
+// Sync custom button with audio element events.
 player.addEventListener('pause', () => {
   if (listening) {
     listening = false;
