@@ -96,7 +96,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{
 		Playing: s.src.IsPlaying(),
 		Track:   s.src.CurrentTrack(),
-		Clients: s.hub.ListenerCount(),
+		Clients: s.hub.ClientCount(),
 	}
 	json.NewEncoder(w).Encode(resp)
 }
@@ -199,19 +199,26 @@ const uiHTML = `<!DOCTYPE html>
     box-shadow: inset 0 2px 8px rgba(0,0,0,0.3), 0 0 20px rgba(204,34,34,0.5), 0 0 60px rgba(204,34,34,0.2);
     text-shadow: 0 0 10px rgba(255,255,255,0.5);
   }
+  .info-box {
+    border: 1px solid #2a2a4a;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    text-align: center;
+  }
   .track {
     font-size: 1.1rem;
     color: #a0a8ff;
     font-style: italic;
     min-height: 1.5em;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     word-break: break-all;
   }
-  .clients { font-size: 0.8rem; color: #505080; margin-bottom: 28px; }
+  .clients { font-size: 1.1rem; color: #808cc0; }
   .vu-wrap {
     display: none;
     justify-content: center;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
   }
   .vu-wrap.visible { display: flex; }
   .vu-meter {
@@ -233,7 +240,8 @@ const uiHTML = `<!DOCTYPE html>
     display: none;
     align-items: center;
     gap: 10px;
-    margin-bottom: 20px;
+    width: 320px;
+    margin: 0 auto 16px auto;
     padding: 10px 16px;
     background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
     border: 3px solid #888;
@@ -283,7 +291,12 @@ const uiHTML = `<!DOCTYPE html>
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
-  .controls { display: flex; gap: 12px; }
+  .controls {
+    display: flex;
+    gap: 12px;
+    width: 320px;
+    margin: 0 auto;
+  }
   button {
     flex: 1;
     padding: 14px;
@@ -308,8 +321,10 @@ const uiHTML = `<!DOCTYPE html>
   <div class="status-row">
     <div class="on-air-sign live" id="onAirSign">ON AIR</div>
   </div>
-  <div class="track" id="track">—</div>
-  <div class="clients" id="clients"></div>
+  <div class="info-box">
+    <div class="track" id="track">—</div>
+    <div class="clients" id="clients"></div>
+  </div>
 
   <div class="vu-wrap" id="vuWrap">
     <div class="vu-meter"><canvas id="vuCanvas"></canvas></div>
