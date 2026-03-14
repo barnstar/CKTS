@@ -210,22 +210,25 @@ const uiHTML = `<!DOCTYPE html>
   .clients { font-size: 0.8rem; color: #505080; margin-bottom: 28px; }
   .vu-wrap {
     display: none;
+    flex-direction: row;
+    justify-content: center;
+    gap: 16px;
     margin-bottom: 24px;
   }
-  .vu-wrap.visible { display: block; }
-  .vu-canvas {
-    width: 100%;
-    height: 48px;
-    border-radius: 8px;
-    background: #111;
+  .vu-wrap.visible { display: flex; }
+  .vu-meter {
+    width: 200px;
+    height: 140px;
+    background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
+    border: 3px solid #888;
+    border-radius: 12px;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.25), 0 4px 12px rgba(0,0,0,0.3);
+    position: relative;
+    overflow: hidden;
   }
-  .vu-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.65rem;
-    color: #505070;
-    margin-top: 4px;
-    padding: 0 2px;
+  .vu-meter canvas {
+    width: 100%;
+    height: 100%;
   }
   audio {
     width: 100%;
@@ -264,10 +267,8 @@ const uiHTML = `<!DOCTYPE html>
   <div class="clients" id="clients"></div>
 
   <div class="vu-wrap" id="vuWrap">
-    <canvas class="vu-canvas" id="vuCanvas"></canvas>
-    <div class="vu-labels">
-      <span>-40</span><span>-30</span><span>-20</span><span>-10</span><span>-5</span><span>0 dB</span>
-    </div>
+    <div class="vu-meter"><canvas id="vuCanvasL"></canvas></div>
+    <div class="vu-meter"><canvas id="vuCanvasR"></canvas></div>
   </div>
 
   <audio id="player" controls></audio>
@@ -286,14 +287,18 @@ const clientEl  = document.getElementById('clients');
 const errMsg    = document.getElementById('errMsg');
 const toggleBtn = document.getElementById('toggleBtn');
 const vuWrap    = document.getElementById('vuWrap');
-const vuCanvas  = document.getElementById('vuCanvas');
-const vuCtx     = vuCanvas.getContext('2d');
+const vuCanvasL = document.getElementById('vuCanvasL');
+const vuCanvasR = document.getElementById('vuCanvasR');
+const vuCtxL    = vuCanvasL.getContext('2d');
+const vuCtxR    = vuCanvasR.getContext('2d');
 
 let listening = false;
 let audioCtx = null;
 let analyserL = null;
 let analyserR = null;
 let vuAnimId = null;
+let needleL = 0;
+let needleR = 0;
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -388,10 +393,9 @@ function stopVU() {
     cancelAnimationFrame(vuAnimId);
     vuAnimId = null;
   }
-  // Clear the canvas.
-  vuCanvas.width = vuCanvas.clientWidth * (window.devicePixelRatio || 1);
-  vuCanvas.height = vuCanvas.clientHeight * (window.devicePixelRatio || 1);
-  vuCtx.clearRect(0, 0, vuCanvas.width, vuCanvas.height);
+  needleL = 0; needleR = 0;
+  drawMeter(vuCtxL, vuCanvasL, 0, 'L');
+  drawMeter(vuCtxR, vuCanvasR, 0, 'R');
 }
 
 function rms(analyser) {
@@ -402,61 +406,143 @@ function rms(analyser) {
   return Math.sqrt(sum / buf.length);
 }
 
+// Map dB (-40..+3) to needle fraction (0..1).
+function dbToFrac(db) {
+  // VU scale is non-linear. We use a piecewise mapping that mimics a real VU.
+  // -20 is the 0 VU reference; above 0 VU is the red zone (+1..+3).
+  const clamped = Math.max(-40, Math.min(3, db));
+  // Map: -40 -> 0, -20 -> 0.56, 0 -> 0.88, +3 -> 1.0
+  if (clamped <= -20) return 0.56 * (clamped + 40) / 20;
+  if (clamped <= 0)   return 0.56 + 0.32 * (clamped + 20) / 20;
+  return 0.88 + 0.12 * clamped / 3;
+}
+
 function drawVU() {
   vuAnimId = requestAnimationFrame(drawVU);
   if (!analyserL || !analyserR) return;
 
-  const dpr = window.devicePixelRatio || 1;
-  const w = vuCanvas.clientWidth;
-  const h = vuCanvas.clientHeight;
-  vuCanvas.width = w * dpr;
-  vuCanvas.height = h * dpr;
-  vuCtx.scale(dpr, dpr);
+  const dbL = 20 * Math.log10(rms(analyserL) + 1e-10);
+  const dbR = 20 * Math.log10(rms(analyserR) + 1e-10);
+  const targetL = dbToFrac(dbL);
+  const targetR = dbToFrac(dbR);
 
-  vuCtx.clearRect(0, 0, w, h);
+  // Smooth needle movement (fast attack, slow release like real VU).
+  const attack = 0.3;
+  const release = 0.08;
+  needleL += (targetL > needleL ? attack : release) * (targetL - needleL);
+  needleR += (targetR > needleR ? attack : release) * (targetR - needleR);
 
-  const barH = 16;
-  const gap = 6;
-  const yL = (h - 2 * barH - gap) / 2;
-  const yR = yL + barH + gap;
-  const pad = 4;
-  const maxW = w - pad * 2;
-
-  // RMS to dB, clamp -40..0
-  const dbL = Math.max(-40, Math.min(0, 20 * Math.log10(rms(analyserL) + 1e-10)));
-  const dbR = Math.max(-40, Math.min(0, 20 * Math.log10(rms(analyserR) + 1e-10)));
-  const fracL = (dbL + 40) / 40;
-  const fracR = (dbR + 40) / 40;
-
-  drawBar(yL, fracL, maxW, barH, pad);
-  drawBar(yR, fracR, maxW, barH, pad);
-
-  // Channel labels.
-  vuCtx.fillStyle = '#505070';
-  vuCtx.font = '10px system-ui, sans-serif';
-  vuCtx.textBaseline = 'middle';
+  drawMeter(vuCtxL, vuCanvasL, needleL, 'L');
+  drawMeter(vuCtxR, vuCanvasR, needleR, 'R');
 }
 
-function drawBar(y, frac, maxW, barH, pad) {
-  // Background track.
-  vuCtx.fillStyle = '#1a1a2a';
-  vuCtx.beginPath();
-  vuCtx.roundRect(pad, y, maxW, barH, 4);
-  vuCtx.fill();
+function drawMeter(ctx, canvas, frac, label) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
 
-  const bw = frac * maxW;
-  if (bw < 1) return;
+  const cx = w / 2;
+  const cy = h * 0.92;
+  const r = w * 0.42;
 
-  // Gradient: teal -> yellow -> red.
-  const grad = vuCtx.createLinearGradient(pad, 0, pad + maxW, 0);
-  grad.addColorStop(0,    '#2a8a7a');
-  grad.addColorStop(0.6,  '#4a9a6a');
-  grad.addColorStop(0.8,  '#b0a040');
-  grad.addColorStop(1,    '#c04040');
-  vuCtx.fillStyle = grad;
-  vuCtx.beginPath();
-  vuCtx.roundRect(pad, y, bw, barH, 4);
-  vuCtx.fill();
+  // Arc angles: left to right sweep.
+  const aStart = Math.PI + 0.35;  // ~215 deg
+  const aEnd   = -0.35;           // ~-20 deg (i.e. ~340 deg)
+
+  // ---- Scale markings ----
+  // dB values and their positions on the arc.
+  const marks = [
+    {db: '-40', frac: 0},
+    {db: '-30', frac: 0.28},
+    {db: '-20', frac: 0.56},
+    {db: '-10', frac: 0.72},
+    {db: '-7',  frac: 0.78},
+    {db: '-5',  frac: 0.82},
+    {db: '-3',  frac: 0.855},
+    {db: '0',   frac: 0.88},
+    {db: '+1',  frac: 0.92},
+    {db: '+2',  frac: 0.96},
+    {db: '+3',  frac: 1.0},
+  ];
+
+  // Draw arc.
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, aStart, aEnd);
+  ctx.stroke();
+
+  // Red zone arc (0 to +3).
+  const redStart = aStart + (aEnd - aStart) * 0.88;
+  ctx.strokeStyle = '#cc3333';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, redStart, aEnd);
+  ctx.stroke();
+
+  // Tick marks and labels.
+  ctx.lineWidth = 1;
+  marks.forEach(m => {
+    const a = aStart + (aEnd - aStart) * m.frac;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const isRed = m.frac >= 0.88;
+    const isMajor = ['0', '-10', '-20', '-30', '-40', '+3'].includes(m.db);
+    const tickLen = isMajor ? 10 : 6;
+
+    ctx.strokeStyle = isRed ? '#cc3333' : '#444';
+    ctx.beginPath();
+    ctx.moveTo(cx + cos * (r - tickLen), cy + sin * (r - tickLen));
+    ctx.lineTo(cx + cos * r, cy + sin * r);
+    ctx.stroke();
+
+    if (isMajor || isRed) {
+      ctx.fillStyle = isRed ? '#cc3333' : '#333';
+      ctx.font = (isMajor ? 'bold ' : '') + '9px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(m.db, cx + cos * (r + 11), cy + sin * (r + 11));
+    }
+  });
+
+  // "VU" label.
+  ctx.fillStyle = '#555';
+  ctx.font = 'bold 11px serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('VU', cx, cy - r * 0.35);
+
+  // Channel label.
+  ctx.fillStyle = '#888';
+  ctx.font = '9px system-ui, sans-serif';
+  ctx.fillText(label, cx, cy - r * 0.18);
+
+  // ---- Needle ----
+  const needleAngle = aStart + (aEnd - aStart) * Math.max(0, Math.min(1, frac));
+  const needleLen = r - 14;
+
+  // Shadow.
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.3)';
+  ctx.shadowBlur = 4;
+  ctx.shadowOffsetY = 2;
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
+  ctx.stroke();
+  ctx.restore();
+
+  // Pivot dot.
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // Sync custom button with native audio controls.
