@@ -156,6 +156,34 @@ const uiHTML = `<!DOCTYPE html>
     max-width: 520px;
     width: 100%;
     box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    position: relative;
+  }
+  .antenna {
+    position: absolute;
+    top: -28px;
+    right: 24px;
+    width: 42px;
+    height: 56px;
+  }
+  .antenna svg {
+    width: 100%;
+    height: 100%;
+    fill: #505080;
+    transition: fill 0.3s;
+  }
+  .antenna.active svg { fill: #a0a8ff; }
+  .antenna .wave {
+    opacity: 0;
+    transform-origin: center bottom;
+  }
+  .antenna.active .wave {
+    animation: antenna-wave 1.8s ease-out infinite;
+  }
+  .antenna.active .wave:nth-child(2) { animation-delay: 0.3s; }
+  .antenna.active .wave:nth-child(3) { animation-delay: 0.6s; }
+  @keyframes antenna-wave {
+    0% { opacity: 0.9; transform: scale(0.7); }
+    100% { opacity: 0; transform: scale(1.2); }
   }
   h1 {
     font-family: 'Impact', 'Arial Black', 'Helvetica Neue', sans-serif;
@@ -200,12 +228,17 @@ const uiHTML = `<!DOCTYPE html>
     text-shadow: 0 0 10px rgba(255,255,255,0.5);
   }
   .info-box {
-    border: 1px solid #2a2a4a;
-    border-radius: 10px;
+    width: 320px;
+    margin: 0 auto 20px auto;
     padding: 14px 18px;
-    margin-bottom: 24px;
     text-align: center;
+    background: linear-gradient(180deg, #e8ddd0 0%, #d8ccb8 100%);
+    border: 3px solid #888;
+    border-radius: 12px;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.2);
   }
+  .info-box .track { color: #555; }
+  .info-box .clients { color: #777; }
   .track {
     font-size: 1.1rem;
     color: #a0a8ff;
@@ -316,6 +349,20 @@ const uiHTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
+  <div class="antenna" id="antenna">
+    <svg viewBox="0 0 64 80" xmlns="http://www.w3.org/2000/svg">
+      <!-- wave arcs -->
+      <path class="wave" d="M44 24c6-5 6-15 0-20" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path class="wave" d="M50 28c10-8 10-24 0-32" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path class="wave" d="M56 32c14-11 14-33 0-44" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <!-- tower -->
+      <circle cx="32" cy="18" r="4" fill="currentColor"/>
+      <line x1="32" y1="22" x2="32" y2="52" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+      <line x1="32" y1="52" x2="20" y2="76" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <line x1="32" y1="52" x2="44" y2="76" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+      <line x1="24" y1="64" x2="40" y2="64" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    </svg>
+  </div>
   <h1>{{CALLSIGN}} Radio</h1>
 
   <div class="status-row">
@@ -351,6 +398,7 @@ const trackEl   = document.getElementById('track');
 const clientEl  = document.getElementById('clients');
 const errMsg    = document.getElementById('errMsg');
 const toggleBtn = document.getElementById('toggleBtn');
+const antennaEl = document.getElementById('antenna');
 const vuWrap   = document.getElementById('vuWrap');
 const vuCanvas = document.getElementById('vuCanvas');
 const vuCtx    = vuCanvas.getContext('2d');
@@ -398,11 +446,13 @@ function applyStatus(data) {
   setError('');
   if (data.playing) {
     onAirSign.classList.add('live');
+    antennaEl.classList.add('active');
     onAirSign.textContent = 'ON AIR';
     trackEl.textContent = data.track || '—';
     clientEl.textContent = data.clients + ' listener' + (data.clients === 1 ? '' : 's');
   } else {
     onAirSign.classList.remove('live');
+    antennaEl.classList.remove('active');
     onAirSign.textContent = 'OFF AIR';
     trackEl.textContent = '—';
     clientEl.textContent = '';
