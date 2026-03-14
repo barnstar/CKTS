@@ -208,6 +208,25 @@ const uiHTML = `<!DOCTYPE html>
     word-break: break-all;
   }
   .clients { font-size: 0.8rem; color: #505080; margin-bottom: 28px; }
+  .vu-wrap {
+    display: none;
+    margin-bottom: 24px;
+  }
+  .vu-wrap.visible { display: block; }
+  .vu-canvas {
+    width: 100%;
+    height: 48px;
+    border-radius: 8px;
+    background: #111;
+  }
+  .vu-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: #505070;
+    margin-top: 4px;
+    padding: 0 2px;
+  }
   audio {
     width: 100%;
     margin-bottom: 24px;
@@ -244,6 +263,13 @@ const uiHTML = `<!DOCTYPE html>
   <div class="track" id="track">—</div>
   <div class="clients" id="clients"></div>
 
+  <div class="vu-wrap" id="vuWrap">
+    <canvas class="vu-canvas" id="vuCanvas"></canvas>
+    <div class="vu-labels">
+      <span>-40</span><span>-30</span><span>-20</span><span>-10</span><span>-5</span><span>0 dB</span>
+    </div>
+  </div>
+
   <audio id="player" controls></audio>
 
   <div class="controls">
@@ -259,8 +285,15 @@ const trackEl   = document.getElementById('track');
 const clientEl  = document.getElementById('clients');
 const errMsg    = document.getElementById('errMsg');
 const toggleBtn = document.getElementById('toggleBtn');
+const vuWrap    = document.getElementById('vuWrap');
+const vuCanvas  = document.getElementById('vuCanvas');
+const vuCtx     = vuCanvas.getContext('2d');
 
 let listening = false;
+let audioCtx = null;
+let analyserL = null;
+let analyserR = null;
+let vuAnimId = null;
 
 function setError(msg) { errMsg.textContent = msg; }
 
@@ -284,10 +317,12 @@ function updateToggle() {
     toggleBtn.innerHTML = '&#9632; Stop Listening';
     toggleBtn.classList.add('on');
     player.classList.add('visible');
+    vuWrap.classList.add('visible');
   } else {
     toggleBtn.innerHTML = '&#9654; Listen';
     toggleBtn.classList.remove('on');
     player.classList.remove('visible');
+    vuWrap.classList.remove('visible');
   }
 }
 
@@ -311,6 +346,7 @@ function startListening() {
   updateToggle();
   player.src = '/stream?' + Date.now();
   player.play().catch(() => {});
+  initVU();
 }
 
 function stopListening() {
@@ -318,6 +354,109 @@ function stopListening() {
   player.src = '';
   listening = false;
   updateToggle();
+  stopVU();
+}
+
+// ---- VU Meter (Web Audio API) ----
+
+function initVU() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+
+  const src = audioCtx.createMediaElementSource(player);
+  const splitter = audioCtx.createChannelSplitter(2);
+
+  analyserL = audioCtx.createAnalyser();
+  analyserR = audioCtx.createAnalyser();
+  analyserL.fftSize = 1024;
+  analyserR.fftSize = 1024;
+  analyserL.smoothingTimeConstant = 0.8;
+  analyserR.smoothingTimeConstant = 0.8;
+
+  src.connect(splitter);
+  splitter.connect(analyserL, 0);
+  splitter.connect(analyserR, 1);
+  src.connect(audioCtx.destination);
+
+  drawVU();
+}
+
+function stopVU() {
+  if (vuAnimId) {
+    cancelAnimationFrame(vuAnimId);
+    vuAnimId = null;
+  }
+  // Clear the canvas.
+  vuCanvas.width = vuCanvas.clientWidth * (window.devicePixelRatio || 1);
+  vuCanvas.height = vuCanvas.clientHeight * (window.devicePixelRatio || 1);
+  vuCtx.clearRect(0, 0, vuCanvas.width, vuCanvas.height);
+}
+
+function rms(analyser) {
+  const buf = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(buf);
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
+}
+
+function drawVU() {
+  vuAnimId = requestAnimationFrame(drawVU);
+  if (!analyserL || !analyserR) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const w = vuCanvas.clientWidth;
+  const h = vuCanvas.clientHeight;
+  vuCanvas.width = w * dpr;
+  vuCanvas.height = h * dpr;
+  vuCtx.scale(dpr, dpr);
+
+  vuCtx.clearRect(0, 0, w, h);
+
+  const barH = 16;
+  const gap = 6;
+  const yL = (h - 2 * barH - gap) / 2;
+  const yR = yL + barH + gap;
+  const pad = 4;
+  const maxW = w - pad * 2;
+
+  // RMS to dB, clamp -40..0
+  const dbL = Math.max(-40, Math.min(0, 20 * Math.log10(rms(analyserL) + 1e-10)));
+  const dbR = Math.max(-40, Math.min(0, 20 * Math.log10(rms(analyserR) + 1e-10)));
+  const fracL = (dbL + 40) / 40;
+  const fracR = (dbR + 40) / 40;
+
+  drawBar(yL, fracL, maxW, barH, pad);
+  drawBar(yR, fracR, maxW, barH, pad);
+
+  // Channel labels.
+  vuCtx.fillStyle = '#505070';
+  vuCtx.font = '10px system-ui, sans-serif';
+  vuCtx.textBaseline = 'middle';
+}
+
+function drawBar(y, frac, maxW, barH, pad) {
+  // Background track.
+  vuCtx.fillStyle = '#1a1a2a';
+  vuCtx.beginPath();
+  vuCtx.roundRect(pad, y, maxW, barH, 4);
+  vuCtx.fill();
+
+  const bw = frac * maxW;
+  if (bw < 1) return;
+
+  // Gradient: teal -> yellow -> red.
+  const grad = vuCtx.createLinearGradient(pad, 0, pad + maxW, 0);
+  grad.addColorStop(0,    '#2a8a7a');
+  grad.addColorStop(0.6,  '#4a9a6a');
+  grad.addColorStop(0.8,  '#b0a040');
+  grad.addColorStop(1,    '#c04040');
+  vuCtx.fillStyle = grad;
+  vuCtx.beginPath();
+  vuCtx.roundRect(pad, y, bw, barH, 4);
+  vuCtx.fill();
 }
 
 // Sync custom button with native audio controls.

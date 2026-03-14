@@ -6,14 +6,17 @@ A streaming audio server written in pure Go for Raspberry Pi and macOS. Broadcas
 
 - Stream MP3 files from a playlist (loops continuously)
 - Stream live audio from a line-in device (Linux ALSA or macOS AVFoundation)
+- Audio source starts automatically — individual listeners tune in/out via their browser
 - Multiple simultaneous listeners — all hear the same broadcast
-- Simple web interface: live status, current track, listener count, play/stop button
+- Web interface with ON AIR indicator, current track, listener count, and listen/stop button
+- Custom radio callsign (displayed in the UI and used as the Tailscale hostname)
 - Pure Go binary, no CGo — cross-compiles cleanly for `linux/arm64` (Raspberry Pi)
 - Runs as a named Tailscale node; no open ports needed
 
 ## Requirements
 
 - Go 1.25.5 or later (`go mod tidy` will download the right toolchain automatically)
+- GNU Make (optional, but recommended)
 - A Tailscale account (or use `-local` for LAN-only operation)
 - `ffmpeg` installed if using line-in (see [Installing dependencies](#installing-dependencies))
 
@@ -47,17 +50,38 @@ ffmpeg -encoders 2>/dev/null | grep mp3lame   # confirm libmp3lame is available
 
 ## Building
 
+The included Makefile handles building for the current platform and cross-compilation.
+
 ```bash
 git clone <repo>
 cd ckts
-go mod tidy   # downloads dependencies and the correct Go toolchain
+make          # builds for the current OS/arch
+```
+
+### Makefile targets
+
+| Target | Description |
+|--------|-------------|
+| `make` / `make build` | Build for the current platform |
+| `make linux-arm64` | Cross-compile for Raspberry Pi (64-bit ARM) |
+| `make linux-amd64` | Cross-compile for Linux x86_64 |
+| `make darwin-arm64` | Cross-compile for macOS Apple Silicon |
+| `make darwin-amd64` | Cross-compile for macOS Intel |
+| `make tidy` | Run `go mod tidy` |
+| `make clean` | Remove all compiled binaries |
+| `make run ARGS="..."` | Build and run with the given flags |
+
+### Manual build (without Make)
+
+```bash
+go mod tidy
 go build -o ckts .
 ```
 
 Cross-compile for Raspberry Pi (64-bit):
 
 ```bash
-GOOS=linux GOARCH=arm64 go build -o ckts-arm64 .
+GOOS=linux GOARCH=arm64 go build -o ckts-linux-arm64 .
 ```
 
 ## Usage
@@ -65,6 +89,8 @@ GOOS=linux GOARCH=arm64 go build -o ckts-arm64 .
 ```
 ./ckts [flags]
 ```
+
+The audio source starts automatically on launch and streams continuously. Individual listeners tune in and out via the web interface — there is no global start/stop from the UI.
 
 ### Flags
 
@@ -75,7 +101,6 @@ GOOS=linux GOARCH=arm64 go build -o ckts-arm64 .
 | `-device <name>` | `default` (Linux) / `0` (macOS) | Audio capture device (Linux ALSA: e.g. `hw:3,0`; macOS AVFoundation: device index e.g. `0`) |
 | `-callsign <name>` | `CKTS` | Radio station callsign (single word, no spaces). Displayed in the web UI as "*callsign* Radio" and used as the Tailscale hostname (`<callsign>-Radio`) |
 | `-authkey <key>` | | Tailscale auth key (omit to authenticate interactively) |
-| `-autoplay` | | Begin streaming immediately on startup |
 | `-local` | | Listen on a plain TCP address instead of tsnet |
 | `-addr <addr>` | `:8080` | Listen address when using `-local` |
 
@@ -85,17 +110,17 @@ Exactly one of `-playlist` or `-linein` must be provided.
 
 **Stream a playlist over Tailscale:**
 ```bash
-./ckts -playlist /home/pi/music/playlist.txt -autoplay
+./ckts -playlist /home/pi/music/playlist.txt
 ```
 
 **Stream line-in over Tailscale (Linux):**
 ```bash
-./ckts -linein -device hw:3,0 -authkey tskey-auth-xxxx -autoplay
+./ckts -linein -device hw:3,0 -authkey tskey-auth-xxxx
 ```
 
 **Stream line-in (macOS):**
 ```bash
-./ckts -linein -device 0 -local -autoplay
+./ckts -linein -device 0 -local
 ```
 
 **Local network only (no Tailscale), for testing:**
@@ -105,9 +130,14 @@ Exactly one of `-playlist` or `-linein` must be provided.
 
 **Custom callsign — brand your station "WKRP Radio":**
 ```bash
-./ckts -callsign WKRP -playlist /home/pi/music/playlist.txt -autoplay
+./ckts -callsign WKRP -playlist /home/pi/music/playlist.txt
 ```
 The web UI will display "WKRP Radio" and the Tailscale node will appear as `WKRP-Radio` on your network.
+
+**Build and run in one step:**
+```bash
+make run ARGS="-local -playlist /home/pi/music/playlist.txt"
+```
 
 ### Playlist file format
 
@@ -124,10 +154,10 @@ One absolute file path per line. Lines beginning with `#` and blank lines are ig
 
 Once running, open a browser and navigate to:
 
-- **Tailscale:** `http://CKTS-Radio` (or whatever `-hostname` you set)
-- **Local:** `http://<pi-ip>:8080`
+- **Tailscale:** `http://CKTS-Radio` (or `http://<callsign>-Radio`)
+- **Local:** `http://<host-ip>:8080`
 
-The web interface shows the current track (or "Line-in"), listener count, and a Start/Stop button. The audio player connects to the `/stream` endpoint automatically when you press Start.
+The web interface shows an ON AIR indicator, the current track (or "Line-in"), and a listener count. Click "Listen" to tune in, or "Stop Listening" to disconnect. Each listener controls only their own playback — the broadcast runs continuously.
 
 You can also point any audio player directly at the stream URL:
 
@@ -202,7 +232,7 @@ Description=CKTS Radio
 After=network.target
 
 [Service]
-ExecStart=/home/pi/ckts -playlist /home/pi/music/playlist.txt -autoplay
+ExecStart=/home/pi/ckts -playlist /home/pi/music/playlist.txt
 Restart=on-failure
 User=pi
 WorkingDirectory=/home/pi
@@ -221,7 +251,9 @@ sudo journalctl -u ckts -f
 
 ## Architecture notes
 
+- The **audio source** starts automatically on launch and runs continuously until the process exits.
 - The **hub** is a thread-safe broadcaster. When the source produces a chunk, it is copied into each connected client's buffered channel. Slow clients get chunks dropped rather than blocking the broadcast — acceptable for radio-style streaming.
 - The **playlist source** throttles reads to approximately 320 kbps so that all listeners stay roughly in sync (radio behaviour). Files play in order and the playlist loops indefinitely.
 - The **line-in source** spawns `ffmpeg` as a child process, capturing audio from the OS audio subsystem (ALSA on Linux, AVFoundation on macOS) and encoding it to MP3 on stdout. The MP3 stream is read and broadcast to all connected clients in real-time.
+- **Listener counting** is done by unique IP address to avoid double-counting (browsers often open multiple HTTP connections per `<audio>` element).
 - tsnet state (Tailscale keys, etc.) is stored in the current working directory under `tsnet-state/`. Run the server from a persistent directory or set `TS_AUTHKEY` if you want fully unattended operation.
