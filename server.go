@@ -167,19 +167,33 @@ const uiHTML = `<!DOCTYPE html>
   .status-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    justify-content: center;
+    margin-bottom: 20px;
   }
-  .dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    background: #444;
-    flex-shrink: 0;
-    transition: background 0.3s;
+  .on-air-sign {
+    display: inline-block;
+    padding: 10px 32px;
+    border-radius: 8px;
+    border: 4px solid #333;
+    background: #2a1a1a;
+    color: #553333;
+    font-family: 'Arial Black', 'Helvetica Neue', Arial, sans-serif;
+    font-size: 1.6rem;
+    font-weight: 900;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    text-align: center;
+    user-select: none;
+    transition: all 0.4s ease;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.5);
   }
-  .dot.live { background: #7c9fff; box-shadow: 0 0 8px #7c9fff60; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-  .status-label { font-size: 0.85rem; color: #8080b0; text-transform: uppercase; letter-spacing: 0.08em; }
+  .on-air-sign.live {
+    background: #cc2222;
+    color: #fff;
+    border-color: #444;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.3), 0 0 20px rgba(204,34,34,0.5), 0 0 60px rgba(204,34,34,0.2);
+    text-shadow: 0 0 10px rgba(255,255,255,0.5);
+  }
   .track {
     font-size: 1.1rem;
     color: #a0a8ff;
@@ -220,8 +234,7 @@ const uiHTML = `<!DOCTYPE html>
   <h1>{{CALLSIGN}} Radio</h1>
 
   <div class="status-row">
-    <div class="dot live" id="dot"></div>
-    <span class="status-label" id="statusLabel">On Air</span>
+    <div class="on-air-sign live" id="onAirSign">ON AIR</div>
   </div>
   <div class="track" id="track">—</div>
   <div class="clients" id="clients"></div>
@@ -236,8 +249,7 @@ const uiHTML = `<!DOCTYPE html>
 
 <script>
 const player    = document.getElementById('player');
-const dot       = document.getElementById('dot');
-const label     = document.getElementById('statusLabel');
+const onAirSign = document.getElementById('onAirSign');
 const trackEl   = document.getElementById('track');
 const clientEl  = document.getElementById('clients');
 const errMsg    = document.getElementById('errMsg');
@@ -250,13 +262,13 @@ function setError(msg) { errMsg.textContent = msg; }
 function applyStatus(data) {
   setError('');
   if (data.playing) {
-    dot.classList.add('live');
-    label.textContent = 'On Air';
+    onAirSign.classList.add('live');
+    onAirSign.textContent = 'ON AIR';
     trackEl.textContent = data.track || '—';
     clientEl.textContent = data.clients + ' listener' + (data.clients === 1 ? '' : 's');
   } else {
-    dot.classList.remove('live');
-    label.textContent = 'Off Air';
+    onAirSign.classList.remove('live');
+    onAirSign.textContent = 'OFF AIR';
     trackEl.textContent = '—';
     clientEl.textContent = '';
   }
