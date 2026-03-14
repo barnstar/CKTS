@@ -2,19 +2,22 @@ package main
 
 import (
 	"encoding/json"
+	"html"
 	"log"
 	"net/http"
+	"strings"
 )
 
 // Server holds the HTTP mux and references to the hub and audio source.
 type Server struct {
-	hub *Hub
-	src AudioSource
-	mux *http.ServeMux
+	hub      *Hub
+	src      AudioSource
+	mux      *http.ServeMux
+	callsign string
 }
 
-func NewServer(hub *Hub, src AudioSource) *Server {
-	s := &Server{hub: hub, src: src, mux: http.NewServeMux()}
+func NewServer(hub *Hub, src AudioSource, callsign string) *Server {
+	s := &Server{hub: hub, src: src, mux: http.NewServeMux(), callsign: callsign}
 	s.mux.HandleFunc("/", s.handleUI)
 	s.mux.HandleFunc("/stream", s.handleStream)
 	s.mux.HandleFunc("/api/status", s.handleStatus)
@@ -31,8 +34,9 @@ func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	pageHTML := strings.ReplaceAll(uiHTML, "{{CALLSIGN}}", html.EscapeString(s.callsign))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(uiHTML))
+	w.Write([]byte(pageHTML))
 }
 
 // handleStream is the audio streaming endpoint.
@@ -130,7 +134,7 @@ const uiHTML = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CKTS Radio</title>
+<title>{{CALLSIGN}} Radio</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -159,7 +163,7 @@ const uiHTML = `<!DOCTYPE html>
     margin-bottom: 8px;
     letter-spacing: 0.05em;
   }
-  .subtitle { color: #6060a0; font-size: 0.9rem; margin-bottom: 32px; }
+  h1 { margin-bottom: 32px; }
   .status-row {
     display: flex;
     align-items: center;
@@ -211,8 +215,7 @@ const uiHTML = `<!DOCTYPE html>
 </head>
 <body>
 <div class="card">
-  <h1>CKTS Radio</h1>
-  <div class="subtitle">Streaming audio server</div>
+  <h1>{{CALLSIGN}} Radio</h1>
 
   <div class="status-row">
     <div class="dot" id="dot"></div>

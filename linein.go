@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os/exec"
+	"runtime"
 	"sync"
 )
 
-// LineInSource captures audio from an ALSA device using ffmpeg and
+// LineInSource captures audio from a system audio input using ffmpeg and
 // streams it to clients as MP3 (audio/mpeg).
+// On Linux it uses ALSA (-f alsa); on macOS it uses AVFoundation (-f avfoundation).
 type LineInSource struct {
 	device string
 	hub    *Hub
@@ -57,22 +60,44 @@ func (l *LineInSource) Stop() {
 	l.hub.CloseAll()
 }
 
+// captureArgs returns the platform-specific ffmpeg input arguments.
+//
+// Linux:  -f alsa -i <device>          (device e.g. "hw:3,0", "plughw:3,0", "default")
+// macOS:  -f avfoundation -i :<device>  (device e.g. "0" for first audio input)
+func captureArgs(device string) ([]string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return []string{"-f", "alsa", "-i", device}, nil
+	case "darwin":
+		// avfoundation format is "video:audio"; ":device" means audio-only.
+		return []string{"-f", "avfoundation", "-i", ":" + device}, nil
+	default:
+		return nil, fmt.Errorf("unsupported OS %q for audio capture", runtime.GOOS)
+	}
+}
+
 func (l *LineInSource) capture(ctx context.Context) {
-	// Use ffmpeg to capture from ALSA and encode to MP3 in real-time.
+	// Use ffmpeg to capture audio and encode to MP3 in real-time.
 	// MP3 is frame-based so browsers can decode the stream incrementally,
 	// unlike WAV which is a file format and causes clicks/pops when streamed.
 	//
 	// Audio format options (-ac, -ar) are placed AFTER -i so they apply to
-	// the output encoder.  This lets ffmpeg auto-negotiate the native ALSA
-	// capture format and resample internally, avoiding garbled audio when
-	// the device doesn't natively support the requested rate.
-	cmd := exec.CommandContext(ctx,
-		"ffmpeg",
+	// the output encoder. This lets ffmpeg auto-negotiate the native capture
+	// format and resample internally, avoiding garbled audio when the device
+	// doesn't natively support the requested rate.
+	inputArgs, err := captureArgs(l.device)
+	if err != nil {
+		log.Printf("linein: %v", err)
+		return
+	}
+
+	args := []string{
 		"-nostdin",
 		"-hide_banner",
 		"-loglevel", "error",
-		"-f", "alsa",
-		"-i", l.device,
+	}
+	args = append(args, inputArgs...)
+	args = append(args,
 		"-ac", "2",
 		"-ar", "44100",
 		"-codec:a", "libmp3lame",
@@ -83,6 +108,8 @@ func (l *LineInSource) capture(ctx context.Context) {
 		"pipe:1",
 	)
 
+	cmd := exec.CommandContext(ctx, "ffmpeg", args...)
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("linein: pipe error: %v", err)
@@ -91,7 +118,7 @@ func (l *LineInSource) capture(ctx context.Context) {
 
 	if err := cmd.Start(); err != nil {
 		log.Printf("linein: ffmpeg start error: %v", err)
-		log.Printf("linein: ensure ffmpeg is installed (apt install ffmpeg)")
+		log.Printf("linein: ensure ffmpeg is installed")
 		return
 	}
 
