@@ -257,5 +257,4 @@ sudo journalctl -u ckts -f
 - The **hub** is a thread-safe broadcaster. When the source produces a chunk, it is copied into each connected client's buffered channel. Slow clients get chunks dropped rather than blocking the broadcast — acceptable for radio-style streaming.
 - The **playlist source** throttles reads to approximately 320 kbps so that all listeners stay roughly in sync (radio behaviour). Files play in order and the playlist loops indefinitely.
 - The **line-in source** spawns `ffmpeg` as a child process, capturing audio from the OS audio subsystem (ALSA on Linux, AVFoundation on macOS) and encoding it to MP3 on stdout. The MP3 stream is read and broadcast to all connected clients in real-time.
-- **Listener counting** is done by unique IP address to avoid double-counting (browsers often open multiple HTTP connections per `<audio>` element).
 - tsnet state (Tailscale keys, etc.) is stored in the current working directory under `tsnet-state/`. Run the server from a persistent directory or set `TS_AUTHKEY` if you want fully unattended operation.
