@@ -2,6 +2,8 @@
 
 A streaming audio server written in pure Go for Raspberry Pi and macOS. Broadcasts MP3 playlists or live line-in audio to multiple browser clients over a [Tailscale](https://tailscale.com) network using [tsnet](https://pkg.go.dev/tailscale.com/tsnet).
 
+![App Screenshot](screen.png)
+
 ## Features
 
 - Stream MP3 files from a playlist (loops continuously)
